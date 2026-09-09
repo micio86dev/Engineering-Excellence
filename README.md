@@ -10,6 +10,45 @@ It is designed to work with **any programming language**, **any framework**, and
 
 ---
 
+# 📥 Installation
+
+Engineering Excellence is a standard agent **skill**, so it installs wherever
+your coding agent looks for skills. Pick whichever method fits your setup.
+
+## 1. `npx skills` (recommended — any agent)
+
+The [`skills`](https://www.npmjs.com/package/skills) CLI copies the skill into
+the target agent's global skills directory. Works for pi, Claude Code, Gemini
+CLI, Cursor, Antigravity, and any agent `skills` supports:
+
+```bash
+npx skills@latest add micio86dev/Engineering-Excellence --skill engineering-excellence --global --agent pi --copy --yes
+```
+
+Keep it on **one line** — the `\` line-continuation is bash-only and breaks in
+PowerShell. Swap `--agent pi` for `claude`, `gemini`, `cursor`, or `antigravity`
+(repeat per agent). Same mechanism as, e.g., `npx skills@latest add mattpocock/skills`.
+
+## 2. As a pi.dev plugin
+
+For [pi](https://pi.dev), the command above installs the skill into
+`~/.pi/agent/skills/engineering-excellence`, where pi loads it automatically on
+the next session. Verify with `pi list` (skills section). No extra registration
+is needed — dropping the skill directory in place is how pi enables it.
+
+## 3. Universal installer script
+
+Clone this repo and run the bundled installer, which mirrors the skill into
+every agent detected on your machine (idempotent):
+
+```bash
+./install.sh            # install into all detected agents
+./install.sh --list     # preview target paths, write nothing
+./install.sh --agents pi,claude
+```
+
+---
+
 # ✨ Features
 
 * 📋 **Spec-Driven Development (SDD)**
