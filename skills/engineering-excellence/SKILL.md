@@ -33,6 +33,7 @@ Load a reference when its concern is in scope for the current task.
 - `references/tdd.md` — test-driven development
 - `references/testing.md` — testing expectations
 - `references/quality-gates.md` — checks required before completion
+- `references/cross-platform-testing.md` — verifying a change on every platform it claims, with containers and multi-platform toolchains
 - `references/code-review.md` — review dimensions
 - `references/engineering-score.md` — final quality reporting
 - `references/documentation.md` — keeping docs current
