@@ -1,3 +1,9 @@
+## 1.2.0
+
+- Added a Git and pull-request reference: commit units, Conventional Commits
+  message format, pull-request descriptions, splitting an oversized branch,
+  CI/CD gates, and contributing to a repository you do not own.
+
 ## 1.1.0
 
 - Added Frontend UX guidance: cursor, hover/focus/disabled states, semantic HTML.

@@ -51,6 +51,7 @@ Load a reference when its concern is in scope for the current task.
 - `references/docker.md` — reproducible environments
 - `references/ci.md` — continuous integration
 - `references/production-readiness.md` — the checklist for shipping to production
+- `references/git-and-pull-requests.md` — commit units, message format, pull-request descriptions, splitting an oversized branch, CI gates, contributing to a repository you do not own
 
 ## Frontend guidelines
 
