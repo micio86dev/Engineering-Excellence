@@ -51,6 +51,9 @@ Load a reference when its concern is in scope for the current task.
 - `references/docker.md` — reproducible environments
 - `references/ci.md` — continuous integration
 - `references/production-readiness.md` — the checklist for shipping to production
+- `references/ci-cd-and-publishing.md` — pipelines, container images, package publishing, deploy and rollback, secrets, auditability
+- `references/api-and-session-security.md` — sessions, cookies, tokens, SSO/OIDC and SAML, REST API hardening, audit logging
+- `references/repository-management.md` — ownership and branch protection, templates, labels, automation, access, audit routine
 
 ## Frontend guidelines
 
