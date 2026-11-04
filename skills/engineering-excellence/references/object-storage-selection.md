@@ -33,7 +33,9 @@ Ceph RADOS Gateway
 Garage
 
 - Designed for self-hosted clusters of modest size across sites: consistent hashing, layout-based
-  placement, no external metadata store, small binary.
+  placement, no external metadata store, small binary. Docs live at
+  https://garagehq.deuxfleurs.fr/documentation/ (checked 2026-08); `garage.dev` is an unrelated
+  startup site, not this project.
 - Narrow on purpose: object storage only, no POSIX, no block. Confirm versioning, object lock and the
   multipart behaviour your client needs (and the current minimum cluster size) rather than assuming.
 - Choose it for backups, media, and internal object storage when you want three nodes and an afternoon,
