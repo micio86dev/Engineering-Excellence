@@ -12,8 +12,11 @@ six settings for a year.
 | nginx / ingress-nginx | Ubiquitous, predictable performance, every problem already answered somewhere | Config sprawl, ACME and dynamic backends need extra pieces |
 | Envoy / Gateway API | The forwarding plane everything else is compared against, L7 policy at scale | You are now writing a platform |
 
-Before standardising on any Kubernetes controller, check its current support status: a retired
-controller is an unpatched edge, and the ecosystem has retired popular ones before.
+Before standardising on a Kubernetes controller, check its support status: a retired controller is an
+unpatched edge. `kubernetes/ingress-nginx` is the worked example, its repository archived by the owner on
+24 March 2026 and read-only since (https://github.com/kubernetes/ingress-nginx): an archived controller still
+runs, but its CVEs stop being fixed. Start new work on Gateway API, and treat any migration off a retired
+controller as a release-sized project with two proxies running side by side, not as a chart bump.
 
 Pick one, write down why, and stop running a second one "temporarily" in the same path.
 
