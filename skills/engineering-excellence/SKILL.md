@@ -26,7 +26,9 @@ Load a reference when its concern is in scope for the current task.
 - `references/engineering-principles.md` — SOLID, DRY, KISS, YAGNI, SoC overview
 - `references/solid.md`, `references/dry.md`, `references/kiss.md`, `references/yagni.md` — individual principles
 - `references/architecture.md` — modular, cohesive, loosely coupled design
+- `references/architecture-and-repo-topology.md` — monolith, modular monolith, microservices; monorepo versus many repositories; data ownership and async contracts
 - `references/technical-debt.md` — recording intentional debt
+- `references/technology-selection.md` — language, framework and UI stack by what the project must do
 
 ### Workflow & quality
 - `references/sdd.md` — spec-driven development
@@ -51,6 +53,7 @@ Load a reference when its concern is in scope for the current task.
 - `references/docker.md` — reproducible environments
 - `references/ci.md` — continuous integration
 - `references/production-readiness.md` — the checklist for shipping to production
+- `references/api-design.md` — REST conventions, contract-first and breaking-change gates, REST versus GraphQL, gRPC and tRPC, webhooks
 
 ## Frontend guidelines
 
