@@ -51,6 +51,9 @@ Load a reference when its concern is in scope for the current task.
 - `references/docker.md` — reproducible environments
 - `references/ci.md` — continuous integration
 - `references/production-readiness.md` — the checklist for shipping to production
+- `references/dns-and-email-delivery.md` — zone design, DNSSEC, split horizon, SPF/DKIM/DMARC, deliverability
+- `references/admin-surface-hardening.md` — admin isolation, step-up auth, Laravel/Node/sandbox specifics, role-matrix tests
+- `references/object-storage-selection.md` — Ceph RGW, Garage, Swift and filesystem gateways, S3 compatibility testing, lifecycle and access
 
 ## Frontend guidelines
 
