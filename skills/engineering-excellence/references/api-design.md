@@ -1,138 +1,86 @@
 # API Design
 
-An API is a contract with callers you cannot refactor: identifiers, error semantics and compatibility policy are
-expensive to reverse, everything else is cheap. Auth and sessions: [references/api-and-session-security.md](references/api-and-session-security.md).
+An API is an unalterable contract with external and internal callers: wire identifiers, error semantics, and compatibility guarantees are costly to reverse, whereas internal implementation details remain cheap. Point at identity and authentication decisions rather than re-architecting security per endpoint. Every public and internal interface must be governed by an explicit schema, an immutable error envelope, and deterministic versioning from day one.
 
 ## Resources and identifiers
 
-- Nouns, plural, lowercase; nest only for genuine containment (`/orders/{id}/lines`), one level deep. Deeper paths are
-  joins wearing a URL.
-- IDs are opaque: no auto-increment integers on a public API, they leak volume and invite enumeration. UUIDv7/ULID or
-  prefixed IDs (`ord_...`). *Opposite:* an admin API behind auth is fine with sequential IDs.
-- No verbs in paths: an operation with its own lifecycle is a sub-resource. `POST /orders/{id}/refunds` → `201` +
-  `Location`. The same rule, not an exception.
+- Resource paths: Use lowercase plural nouns; nest only for true parent-child containment (/orders/{id}/lines) capped at one level deep. Avoid nested joins disguised as URIs.
+- Opaque identifiers: Never expose auto-increment database integer keys on public or inter-service APIs to prevent enumeration attacks and volume leakage. Use UUIDv7, ULID, or type-prefixed strings (ord_123).
+- Sub-resources over verbs: Model distinct state lifecycle operations as sub-resources rather than embedding verbs in URIs (for example, POST /orders/{id}/refunds returning 201 Created and a Location header).
+Name resources strictly as nouns with opaque identifiers; declare operation lifecycles as explicit sub-resources.
 
-## The happy path
+## The happy path and HTTP semantics
 
 | Intent | Request | Success | Rule |
 | --- | --- | --- | --- |
-| Create, server assigns ID | `POST /orders` | `201` + `Location: /orders/{id}` | RFC 9110 §15.3.2: `Location` names the created resource |
-| Create or full replace, client picks ID | `PUT /orders/{id}` | `201` on create, `200`/`204` on replace | RFC 9110 §9.3.4 mandates this split; the body is the whole representation |
-| Partial update | `PATCH` + `If-Match` | `200` or `204` | Declare the format: `merge-patch+json` (RFC 7396) or `json-patch+json` (RFC 6902) |
-| Delete | `DELETE /orders/{id}` | `204` | Repeats return `204` or `404` — pick one, document it |
-| Accepted for later | `POST /exports` | `202` + an operation URL to poll | RFC 9110 §15.3.3: HTTP cannot resend a status for work not yet done |
+| Create (server ID) | POST /orders | 201 + Location: /orders/{id} | RFC 9110: Location header identifies the newly created resource URI |
+| Replace or create | PUT /orders/{id} | 201 on create, 200/204 on replace | RFC 9110: Request payload represents the complete resource state |
+| Partial update | PATCH + If-Match | 200 or 204 | Specify merge-patch+json (RFC 7396) or json-patch+json (RFC 6902) |
+| Delete resource | DELETE /orders/{id} | 204 No Content | Subsequent requests must consistently return 204 or 404 Not Found |
+| Asynchronous queue | POST /exports | 202 Accepted + Location /tasks/{id} | RFC 9110: Return an operation URI for client status polling |
 
-`PATCH` is neither safe nor idempotent, and concurrent patches corrupt data more readily than `PUT` collisions because
-they need a known base point (<https://www.rfc-editor.org/rfc/rfc5789>), so `PATCH` without `If-Match` is a data-loss bug.
-`DELETE` severs the URI's association with its functionality, not the bytes: soft delete is legal only if `GET` then answers `404`/`410`.
+Unsafe PATCH updates without If-Match preconditions risk silent lost updates (RFC 5789, https://www.rfc-editor.org/rfc/rfc5789). Soft deletions must sever the URI mapping so subsequent GET calls return 404 Not Found or 410 Gone. Require precondition headers on all state mutations.
 
-## Status codes and errors
+## Status codes and error envelopes
 
-| Code | Means | Not for |
-| --- | --- | --- |
-| `201` / `202` | Created; queued with a way to check | Anything already finished |
-| `204` / `304` | Nothing to return; conditional `GET` unchanged | Mutations |
-| `400` / `422` | Unparseable request / valid syntax, invalid semantics (§15.5.21) | Crashes |
-| `401` / `403` | No or bad credentials / authenticated but not permitted | Hiding existence — use `404` |
-| `409` | Conflicts with current state, caller can resolve and resubmit (§15.5.10) | Retryable contention — use `429`/`503` |
-| `412` / `428` | `If-Match` failed / server requires a conditional request (RFC 6585 §3) | Optional preconditions |
-| `415` / `429` | Unsupported media type; rate limited — `429` always carries `Retry-After` | Client mistakes |
+Standardize on RFC 9457 Problem Details (application/problem+json, https://www.rfc-editor.org/rfc/rfc9457) across every endpoint and service boundary:
+- Error structure: Return type (stable URI machine identifier), title (short human-readable summary), status (HTTP status code), and detail (contextual explanation without leaking stack traces or raw database queries).
+- Consistent semantics: Use 400 for malformed syntax, 422 for unprocessable business validation, 401 for missing/invalid credentials, 403 for insufficient authorization, 404 for missing resources, 409 for state conflicts, 412 for failed If-Match, 428 for required preconditions, and 429 with a mandatory Retry-After header for rate limits.
+Never return HTTP 200 with {"success": false}; status codes must enable intermediate proxies, gateways, and clients to branch.
 
-Errors use RFC 9457 problem details, `application/problem+json` (July 2023), obsoleting RFC 7807
-(<https://www.rfc-editor.org/rfc/rfc9457>): `type` is the permanent machine identifier clients branch on, `title` and
-`detail` serve humans, and nothing leaks stack traces or SQL. *Opposite:* a single-consumer internal API may return raw
-domain codes — still one envelope, never `200` with `{"success": false}`, because every retry, cache and dashboard in the path reads the status line.
+## Style selection: REST, GraphQL, gRPC, typed RPC, and Events
 
-## Lists, retries, conditionals
+| Style | Fits when | Cost added | Smallest signal you picked wrong |
+| --- | --- | --- | --- |
+| REST (JSON over HTTP) | Public APIs, edge caching (RFC 9111 ETag, Cache-Control), polyglot integrations | Chatty sequential round-trips; over-fetching nested models | Mobile screens making 10 chained requests to render one view |
+| GraphQL | Heterogeneous frontends, resource aggregation, BFF layers (Thoughtworks Radar) | Breaks standard HTTP caching (needs APQ); N+1 queries (needs DataLoader); query DoS risk | Using GraphQL for inter-service microservice RPC or simple CRUD |
+| gRPC (Protobuf over HTTP/2) | High-throughput internal RPC, bi-directional streaming, strict status propagation | Binary format; browsers lack HTTP/2 trailers (needs Envoy gRPC-Web or Connect RPC) | Browser web clients calling raw gRPC services without a proxy |
+| Typed RPC (tRPC) | Full-stack TypeScript monorepos with unified client-server codebases (trpc.io) | Zero tech-agnostic schema; runtime locked to TypeScript; leaks server types into bundle | Non-TypeScript or third-party external consumers need to integrate |
+| Asynchronous Events | Decoupled workflows, fan-out event notifications, state transfer (Fowler taxonomy) | Eventual consistency window; broker ops; duplicate delivery requiring deduplication | Structuring request-reply RPC commands as passive-aggressive events |
 
-- **Cursor pagination, always.** `{ "data": [...], "has_more": true, "next_cursor": "..." }`, or `Link: <...>;
-  rel="next"` (RFC 8288). The opaque cursor is the sort key plus a unique tiebreaker, so concurrent inserts cannot skip
-  or repeat rows; Stripe uses this shape (<https://docs.stripe.com/api/pagination>). *Opposite:* offset paging is right for small admin tables where users jump to page 7.
-- **Idempotency keys for unsafe retries.** Accept `Idempotency-Key` on `POST`/`PATCH`, store key, request fingerprint
-  and response, replay on retry, reject a reused key with a different body. Still an IETF httpapi Internet-Draft
-  (<https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/>), so pin the rules yourself. *Opposite:* `PUT` and `DELETE` are already idempotent.
-- **Conditional requests.** Every `GET` returns a strong `ETag`; `If-None-Match` → `304`. Mutations take `If-Match` →
-  `412`; where correctness depends on it, *require* the header and answer `428`, so a lost update becomes impossible
-  rather than unlikely. *Opposite:* last-write-wins suits low-value preferences — document it, do not imply safety.
+In GraphQL, batch database queries in DataLoader (https://github.com/graphql/dataloader), deploy Automatic Persisted Queries (https://www.apollographql.com/docs/apollo-server/performance/caching), and enforce OWASP query depth limits (https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html). In gRPC, Protocol Buffer field tags are immutable once published; mark deleted tags as reserved (reserved 4, 8; reserved "name"; https://protobuf.dev/programming-guides/proto3/). In event systems, format envelopes using CloudEvents 1.0 (64KB boundary; https://cloudevents.io/) and document asynchronous broker channels using AsyncAPI 3.0 (https://www.asyncapi.com/).
+Choose the protocol matching caller boundaries; isolate internal gRPC or tRPC mechanisms behind a REST or BFF edge.
 
-## Contract-first
+## Contract-first discipline and lifecycle
 
-Write the OpenAPI document first, or generate it from typed handlers — one source of truth, never both edited by hand.
-Current version 3.2.1 (10 September 2026); 3.1+ align schemas with JSON Schema 2020-12
-(<https://spec.openapis.org/oas/latest.html>). Generate clients and docs from it; hand-written per-endpoint `fetch`
-wrappers drift within a sprint. Gate it in CI: `oasdiff breaking base.yaml head.yaml --fail-on-diff` exits non-zero on
-`ERR`/`WARN` findings (<https://github.com/tufin/oasdiff>). Additive-only is the default — optional fields, new
-endpoints, widened enums, the last only if you published which enums are open, as Stripe does
-(<https://docs.stripe.com/api/enums>). *Opposite:* two internal services owned by one team need neither; the spec file still beats any wiki.
+Write contracts prior to implementation; the schema is the single source of truth driving generated clients and validation.
+- Schema standards: Author OpenAPI 3.1 contracts (aligned 100% with JSON Schema 2020-12, https://spec.openapis.org/oas/v3.1.0.html) or OpenAPI 3.2 supporting the HTTP QUERY method (RFC 10008) for safe, cacheable queries with request bodies.
+- Automated client generation: Generate client SDKs and mock servers directly from OpenAPI or AsyncAPI schemas; hand-written per-endpoint fetch wrappers drift and cause production runtime regressions.
+- Breaking change CI gates: Run contract diffing tools (such as oasdiff or buf breaking) in CI pipelines to fail builds on breaking schema changes, unannounced enum deletions, or protobuf tag renumbering.
+- Versioning and deprecation: Expose only major version identifiers in URI paths (Google AIP-185, https://google.aip.dev/185) or run date-based rolling transformations (Stripe, https://stripe.com/blog/api-versioning). Announce deprecation via the Deprecation header (RFC 9745) with a minimum 180-day migration window before terminating endpoints with Sunset (RFC 8594).
+Enforce automated contract checks in continuous integration; fail any pull request that introduces an unversioned breaking diff.
 
-## Versioning and deprecation
+## Lists, retries, and conditionals
 
-| Strategy | Choose when | Cost |
-| --- | --- | --- |
-| URL prefix `/v1` | Public API, third parties, mixed client generations | Encourages `/v2` rewrites over fixes; two APIs live forever |
-| Version header, pinned per request | Per-client migration without URL churn — Stripe ships monthly non-breaking releases and twice-yearly breaking majors, pinned by `Stripe-Version` (<https://docs.stripe.com/api/versioning>) | Invisible in logs and curl; one translation layer per version |
-| Media-type negotiation | Strict HTTP, few consumers | Every tool, CDN and codegen fights you |
-| No version, additive forever | Feeds and contracts you can never break | One unavoidable fix and you ship `/v2` anyway |
+- Cursor pagination: Paginate active collections using opaque cursors ({ "data": [...], "has_more": true, "next_cursor": "..." }; Stripe, https://docs.stripe.com/api/pagination). The cursor combines sort key and unique tiebreaker; never use offset paging on live data.
+- Idempotency keys: Accept Idempotency-Key on mutating POST and PATCH operations (draft-ietf-httpapi-idempotency-key-header). Persist key, request hash, and response in cache/database; replay previous responses on retry, and reject body mismatches.
+- Conditional requests: Serve strong ETags on GET responses. Require If-Match on mutating requests and return 428 Precondition Required when omitted, guaranteeing that concurrent writes do not trigger data loss.
+Implement cursor pagination, strong ETags, and idempotency key persistence across all stateful collection endpoints.
 
-Deprecate before you sunset. `Deprecation: @1688169599` (RFC 9745, March 2025, structured-field date) marks a resource
-as discouraged while it still works, with `Link: <policy>; rel="deprecation"` to the migration note; `Sunset: Sat, 31
-Dec 2028 23:59:59 GMT` (RFC 8594) marks only the date the URI stops responding — RFC 8594 says Sunset is explicitly
-*not* for the merely-discouraged stage. Watch per-version traffic before deleting: a version still serving at sunset is a failed migration. *Opposite:* a live security hole justifies breaking now, with direct outreach.
+## The frontend boundary and cross-service auth
 
-## Choosing the style
-
-| Requirement | REST+JSON | GraphQL | gRPC | tRPC |
-| --- | --- | --- | --- | --- |
-| Consumers you do not control | Best: cacheable, curl-able | Viable, with schema-use and cost policy | Poor: proxies, schema distribution, codegen per consumer | No: TypeScript only |
-| Diverse field needs from one graph | Over-fetching, chatty | Best | Not expressive | Fits, if all consumers are yours |
-| HTTP caching | Free (`ETag`, `Cache-Control`) | Lost — one `POST` endpoint, so you build persisted queries | Not applicable | Not applicable |
-| Streaming | SSE one-way, else a socket | Subscriptions over a persistent transport | Best: all four stream shapes | Subscriptions only |
-| Authorization | Per route, auditable | **Per field** — route-level checks leak sibling fields | Per method, from metadata | Per procedure |
-| Schema evolution | Additive fields; clients must tolerate unknowns | Schema diffing; removing a field is breaking | Protobuf tags, wire-compatible if numbers are never reused (<https://protobuf.dev/programming-guides/proto3/#updating>) | Compile-time only, no runtime contract |
-| Known trap | Chatty clients | Resolver N+1; batch with DataLoader | grpc-web: unary and server-streaming only, no client or bidi streaming | Server types leak into the client bundle |
-
-GraphQL N+1 is fixed by batching in a DataLoader (<https://github.com/graphql/dataloader>); gRPC's browser limits are in
-grpc-web's README (<https://github.com/grpc/grpc-web>). tRPC is RPC for TypeScript monorepos where you "ignore details
-like HTTP verbs" (<https://trpc.io/docs/concepts>): a good trade while one team ships both sides, a liability the day an independent consumer appears.
-
-## Async and webhooks
-
-- **At-least-once is the only honest guarantee.** Consumers dedupe on your event ID; claiming exactly-once moves the bug.
-- **Retry with exponential backoff plus jitter over hours, then park in a dead-letter queue** with a replay endpoint;
-  Standard Webhooks recommends multi-day schedules with jitter to avoid retry storms
-  (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>). *Opposite:* fire-and-forget is fine for analytics pings.
-- **Sign everything.** Standard Webhooks: HMAC-SHA256 over `id.timestamp.body` in `webhook-id`, `webhook-timestamp`,
-  `webhook-signature`; verify before parsing, reject stale timestamps, compare in constant time. RFC 9421 signs requests.
-- **Ordering is not delivery.** Ship a monotonic `sequence`; never infer state from arrival order.
-- **Outbox, not dual writes.** Write the event in the same transaction as the state change and let a relay publish it
-  (<https://microservices.io/patterns/data/transactional-outbox.html>). Sending after commit loses events on crash; sending inside the request duplicates them on retry.
-
-## The front-end contract
-
-- **BFF when** clients differ in shape, sessions live in cookies, or the browser must not see internal services;
-  **public API when** third parties integrate. Need both, build both — never let the public API acquire page shapes.
-- **Token propagation:** the browser holds a session, the BFF holds tokens and calls services with them. Never forward
-  browser tokens inward, and never trust caller-supplied identity claims.
-- **Caching:** explicit `Cache-Control` on every `GET` (`no-store` by default, `max-age` or `stale-while-revalidate`
-  for public reads), `Vary` on anything that changes the body, `private` for authenticated responses — a shared cache holding a user-specific body (RFC 9111) is an incident.
-- **CORS is a browser permission, not authorization:** exact origin allowlist, credentials only with a specific origin (never `*`), and `Access-Control-Max-Age` so preflights are not paid repeatedly.
-- **Consumers you do not control are the product:** contract tests, a changelog, a status page and rate limits with `Retry-After`, or you learn about breakage from their tickets.
+- Contract is the interface: API contracts decouple frontends from server frameworks. Deploy a Backend-for-Frontend (BFF) when web, mobile, and third-party consumers require divergent data aggregations or operational latencies.
+- Fixed on day one: Cursor pagination, field filtering, idempotency keys, and RFC 9457 error envelopes must be standardized on day one across all endpoints to prevent client fragmentation.
+- Edge cookie sessions vs. bearer tokens: Storing bearer access tokens in browser localStorage or sessionStorage is a severe security defect exposing credentials to XSS exfiltration (OWASP / IETF BCP for Browser-Based Apps). The BFF executes OAuth 2.1 Authorization Code flow with mandatory PKCE (RFC 9700 / RFC 7636) and issues HttpOnly, Secure, SameSite=Lax session cookies. Mitigate CSRF using cryptographic anti-CSRF tokens and Fetch Metadata headers (Sec-Fetch-Site: same-origin). Avoid wildcard cookie domains (Domain=.example.com) to limit subdomain compromise blast radius.
+- Workload identity and audience scoping: Replace perimeter castle-and-moat models with Zero Trust (NIST SP 800-207). Authenticate service-to-service calls using mTLS with SPIFFE/SPIRE SVIDs (https://spiffe.io/) or cloud Workload Identity Federation (IRSA, GCP WIF). Validate the aud claim on internal JWTs (RFC 9068) to prevent token replay across microservices. Use RFC 8693 Token Exchange (https://www.rfc-editor.org/rfc/rfc8693.html) to trade user session tokens for downscoped, audience-restricted tokens carrying the act delegation claim, preventing Confused Deputy attacks.
+Terminate browser sessions at the BFF with HttpOnly cookies; pass audience-scoped workload tokens to internal services.
 
 ## Failure modes
 
-- `200 OK` with an error body — retries, caching and alerting silently disabled; a closed enum gained a value and every client `switch` fell through.
-- Offset pagination on a live feed — rows skipped or repeated, and finance notices first.
-- A retried `POST` charged twice; a webhook sent inline after commit vanished on the first crash; `/v2` cut to tidy names, so both versions run forever.
+- HTTP 200 with error payload: Silently disables client retry policies, edge CDN caching, and monitoring alerts.
+- Offset pagination on mutating streams: Causes skipped records and duplicate items during concurrent write activity.
+- In-browser token storage: Exposes access credentials to automated extraction via compromised third-party script libraries.
+- Unprotected mutating retries: Duplicate financial transactions caused by missing Idempotency-Key headers on POST calls.
+- Broad internal token audience: Compromised downstream service replays client bearer tokens against peer administrative APIs.
+Audit status codes, token scopes, and idempotency validation continuously to eliminate perimeter failure modes.
 
-## Checklist
+## Decision checklist
 
-- [ ] Every collection lists via cursor pagination with an opaque cursor and a unique tiebreaker
-- [ ] Create returns `201` + `Location`; replace returns `201`/`200`/`204`; delete is consistently `204` or `404`
-- [ ] Mutations that can lose data require `If-Match` and answer `412`, or `428` when mandatory
-- [ ] Unsafe retryable operations accept an `Idempotency-Key` and replay the original response
-- [ ] One error envelope with documented, stable machine codes; no `200`-with-error anywhere
-- [ ] The OpenAPI document is authored or generated in exactly one place and drives clients and docs
-- [ ] CI fails on a breaking contract diff against the last release
-- [ ] `Deprecation` and `Sunset` headers, a policy link and a published retirement window precede removal
-- [ ] Webhooks are signed, retried with backoff and jitter, deduplicated by event ID, and emitted from an outbox
-- [ ] The style choice and versioning strategy are recorded in an ADR, with per-version traffic monitored
+- [ ] Is API style selected from verified architectural constraints (REST, GraphQL, gRPC, tRPC, Events) rather than habit?
+- [ ] Is OpenAPI 3.1/3.2 authored contract-first, with CI diffing (oasdiff) blocking breaking changes before merge?
+- [ ] Are all error responses structured under RFC 9457 Problem Details envelopes with explicit machine-readable codes?
+- [ ] Do collection endpoints use cursor pagination with opaque cursors and unique tiebreakers instead of offset paging?
+- [ ] Do mutating endpoints require If-Match preconditions and accept Idempotency-Key headers for retry safety?
+- [ ] Are browser credentials stored exclusively in HttpOnly, Secure, SameSite cookies managed by a BFF or edge gateway?
+- [ ] Are service-to-service calls authenticated via mTLS workload identities with strict audience validation (RFC 9068)?
+- [ ] Is token delegation downscoped via RFC 8693 Token Exchange to prevent Confused Deputy vulnerabilities?
