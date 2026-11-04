@@ -1,6 +1,6 @@
 # Architecture and Repo Topology
 
-Architecture shape, repository layout, and data ownership form one coupled system: repository topology governs change velocity, while persistence boundaries govern isolation. A distributed monolith across multiple repositories adds network failure modes without deployment independence. This reference synthesizes primary architectural research alongside framing from practitioner MicioDev, "Basta Monoliti! Come Progettare Software Seri nell'Era dell'AI" (published 2026-10-29), where the video chapter outline and description, not a transcript, serve as the source. Choose the simplest topology that satisfies verified business isolation constraints.
+Architecture shape, repository layout, and data ownership form one coupled system: repository topology governs change velocity, while persistence boundaries govern isolation. A distributed monolith across multiple repositories adds network failure modes without deployment independence. This reference synthesizes primary architectural research alongside framing from practitioner MicioDev, "Basta Monoliti! Come Progettare Software Seri nell'Era dell'AI" (published 2026-10-29), whose argument is taken from the video's auto-generated caption transcript. Choose the simplest topology that satisfies verified business isolation constraints.
 
 ## The shape decision: staged path to extracted services
 
@@ -40,14 +40,26 @@ Assign each entity to one authoritative service datastore; integrate across boun
 
 ## Worked example: splitting a monolith into service repositories
 
-Reconstructing the video outline from practitioner MicioDev ("Basta Monoliti! Come Progettare Software Seri nell'Era dell'AI", October 29, 2026; outline and description source, no transcript) yields an actionable decomposition sequence:
-1. Sever frontend from backend at the MVC tier: Replace server-rendered coupled views with technology-independent REST contracts, decoupling presentation cycles from backend releases.
-2. Centralize identity, roles, and SSO first: Extract authentication and permission verification into a dedicated foundation service before decomposing business domains, establishing a uniform token standard.
-3. Partition user interfaces by operational profile: Separate specialized frontends (such as real-time video streaming interfaces vs. administrative metric dashboards) so divergent UI churn does not dictate backend changes.
-4. Establish the umbrella core and satellite repositories: Place common contracts, protocol types, and client SDKs in an umbrella core repository; provision lightweight satellite repositories per business domain that consume pinned core releases.
-5. Isolate persistence and cache per service: Allocate dedicated schemas and Redis cache-aside layers to each service; replace cross-domain database joins with transactional outbox event streams.
-6. Enforce edge security and operational SLAs: Terminate sessions at the edge using HttpOnly and Secure cookies, propagate downscoped audience-restricted tokens to downstream services, and configure load balancing with dedicated SLA alerts.
-Decompose systems incrementally: stabilize edge contracts and identity infrastructure before extracting domain persistence models.
+The source for this section is the auto-generated transcript of MicioDev's "Basta Monoliti! Come Progettare Software Seri nell'Era dell'AI" (published 2026-10-29), obtained from the video's caption track. The steps below follow the speaker's own decisions, not a reconstructed outline.
+
+1. Reject the classic MVC monolith, where the front-end is welded to back-end logic, and expose the backend only through REST/GraphQL from the start. The buy is a second client (mobile app, back office vs. customer site) without duplicated backend work; the cost is pushing every capability server-side and gating clients with roles and permissions.
+2. Apply the mobile-app test as the forcing function: a mobile client inevitably requires REST APIs, so build them before the app arrives. The buy is one agnostic backend serving many clients; the cost is that roles and permissions, not per-client backends, must carry the differences.
+3. Split his avatar product into three services: accounts plus SSO, interviews (data collection and scoring), and the avatar service (what to say plus visual lipsync). The avatar service is reused by the interview app and by another site's chatbot widget, and SSO is shared by both; the cost he names is a bit more server environment (separate nodes).
+4. Give each specialized front-end its own app: the Zoom/Meet join page runs on a separate subdomain, and dashboards are separate because the backend pre-elaborates data and caches it in Redis or Valkey. The buy is UI churn isolated from backend changes; the cost is more front-ends and caches to operate.
+5. Centralize identity and access in one service acting as mirror, central communicator, and bus through which almost all operations pass. The buy is no duplicated user-account lists or separate logins; the cost he names is a bit more server environment, while the unspoken cost is a new single point of failure.
+6. Connect services with API tokens, public/private API keys, or SDKs, and carry SSO sessions in HTTP-only cookies shared across third-level subdomains. The buy is a single session across subdomains; the cost is cross-domain cookie forcing, exactly where cookie risk concentrates.
+7. Add a DevOps layer underneath: a load balancer, a clustered real-time replicated database, and SLA awareness as basic knowledge. The buy is surviving a node failure and spreading traffic; the cost is operating and monitoring the nodes he lists as the most likely to fall (Redis, database, backend, frontend).
+
+Verbatim quotes from the transcript:
+- "il monolite è il male assoluto." - the monolith is framed as absolute evil, with no qualification.
+- "il giorno in cui devo fare un'app mobile, per forza di cose devo fare le API REST" - a mobile app is what forces the REST APIs to exist.
+- "vedere gente che faceva l'elaborazione dei dati lato front-end. Ragazzi, è una pazzia." - computing data on the client is called madness.
+- "utilizzando ancora cookie HTTP only, che sono quelli più sicuri al momento." - HTTP-only cookies are ranked the most secure session mechanism he knows.
+- "non si può evitare al 100% una perdita di dati, al 100% una caduta del servizio" - zero data loss and zero downtime are impossible.
+
+### What the talk leaves out
+
+The absolutes that open and frame the talk (the monolith as absolute evil, a winning move for every project) carry no benchmarks or case studies and skip the modular-monolith middle ground. The AI-era speed claim ignores that generated code still has to be reviewed, integrated, and operated, and microservices multiply that surface. The central bus through which almost all operations pass reintroduces a single point of failure, and the cookie ranking omits SameSite, CSRF, and the bearer-token-in-cookie vs. header trade-off.
 
 ## Migrating out of a monolith
 
