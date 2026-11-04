@@ -51,6 +51,9 @@ Load a reference when its concern is in scope for the current task.
 - `references/docker.md` — reproducible environments
 - `references/ci.md` — continuous integration
 - `references/production-readiness.md` — the checklist for shipping to production
+- `references/container-orchestration-choice.md` — Compose, Swarm or Kubernetes for one host or a few nodes, and the triggers to move up
+- `references/traffic-and-ingress.md` — reverse proxy and ingress choice, TLS/ACME, proven defaults, proxy and controller operations
+- `references/practitioner-toolbox.md` — the shared substrate, and the tool each of data scientist, IT manager and DevOps actually needs
 
 ## Frontend guidelines
 
